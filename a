@@ -1,20 +1,21 @@
 import pandas as pd
 import json
-from pandas import json_normalize
 
-def flatten_all_json_columns_no_explode(df):
+def flatten_nested_columns(df):
     """
-    扁平化 DataFrame 所有 JSON 列，递归展开嵌套 dict 和 list，
-    但不拆分成多行。list 类型会被索引拆分成多列。
-    
-    参数：
-        df: 输入的 DataFrame
-    
-    返回：
-        扁平化且保持行数不变的 DataFrame
+    Flattens only the nested (dict/list/JSON) columns of a DataFrame.
+    Column names of flattened parts are renamed with dot notation.
+    Non-nested columns are left unchanged.
+
+    Args:
+        df (pd.DataFrame): Input DataFrame
+
+    Returns:
+        pd.DataFrame: DataFrame with only nested fields flattened
     """
 
     def parse_json(val):
+        # Try to parse JSON strings into Python objects (dict or list)
         if isinstance(val, str):
             try:
                 return json.loads(val)
@@ -23,10 +24,7 @@ def flatten_all_json_columns_no_explode(df):
         return val
 
     def flatten_element(elem, prefix=''):
-        """
-        递归展开 dict 或 list，返回一个扁平的 dict，键为带路径的字符串。
-        list 会用索引标记键名，不会拆成多行。
-        """
+        # Recursively flatten dicts and lists into a flat dict with dot-separated keys
         items = {}
         if isinstance(elem, dict):
             for k, v in elem.items():
@@ -41,23 +39,20 @@ def flatten_all_json_columns_no_explode(df):
         return items
 
     df = df.copy()
-
-    # 先把所有 object 列中可能是 JSON 字符串的解析成 dict/list
     for col in df.columns:
         if df[col].dtype == 'object':
+            # Try to parse as JSON if it's a string
             df[col] = df[col].apply(parse_json)
 
-    # 存放所有列的扁平化结果
     flat_cols = []
-
-    # 对每行，每列做扁平化，结果是 dict，转成 DataFrame 后横向拼接
     for col in df.columns:
-        flat_dicts = df[col].apply(lambda x: flatten_element(x) if isinstance(x, (dict, list)) else {col: x})
-        flat_df = pd.DataFrame(flat_dicts.tolist())
-        # 给列名加上原列名前缀（避免重复）
-        flat_df.columns = [f"{col}.{c}" for c in flat_df.columns]
-        flat_cols.append(flat_df)
+        if df[col].apply(lambda x: isinstance(x, (dict, list))).any():
+            # Needs flattening
+            flat_dicts = df[col].apply(lambda x: flatten_element(x, col) if isinstance(x, (dict, list)) else {col: x})
+            flat_df = pd.DataFrame(flat_dicts.tolist())
+            flat_cols.append(flat_df)
+        else:
+            # No flattening needed
+            flat_cols.append(df[[col]])
 
-    # 拼接所有扁平化列
-    result_df = pd.concat(flat_cols, axis=1)
-    return result_df
+    return pd.concat(flat_cols, axis=1)
