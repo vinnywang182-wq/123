@@ -82,45 +82,57 @@ def flatten_nested_columns(df):
 
 
 
+
+
+
+
 import pandas as pd
 import json
+import numpy as np
 
-
-
-def flatten_nested_columns(df):
-    def flatten_element(elem, prefix=''):
-        """Recursively flattens dicts/lists into flat keys"""
-        items = {}
-        if isinstance(elem, dict):
+def flatten_element(elem, prefix=''):
+    items = {}
+    if isinstance(elem, dict):
+        if not elem:
+            # empty dict, keep as is
+            items[prefix] = {}
+        else:
             for k, v in elem.items():
                 new_key = f"{prefix}.{k}" if prefix else k
-                items.update(flatten_element(v, new_key))
-        elif isinstance(elem, list):
+                # if v is empty list or dict, still keep key
+                if v == [] or v == {}:
+                    items[new_key] = v
+                else:
+                    items.update(flatten_element(v, new_key))
+    elif isinstance(elem, list):
+        if not elem:
+            # empty list, keep as is
+            items[prefix] = []
+        else:
             for i, v in enumerate(elem):
                 new_key = f"{prefix}.{i}" if prefix else str(i)
                 items.update(flatten_element(v, new_key))
-        else:
-            items[prefix] = elem
-        return items
+    else:
+        items[prefix] = elem
+    return items
 
-    def try_parse_json(val):
-        """Try to convert a string to dict/list if it's JSON-like"""
-        if isinstance(val, str):
-            try:
-                parsed = json.loads(val)
-                if isinstance(parsed, (dict, list)):
-                    return parsed
-            except json.JSONDecodeError:
-                return val
-        return val
+def try_parse_json(val):
+    if isinstance(val, str):
+        try:
+            parsed = json.loads(val)
+            if isinstance(parsed, (dict, list)):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+    return val
 
+def flatten_nested_columns(df):
     df = df.copy()
-
-    # Step 1: Parse JSON-like columns
+    # parse json strings to dict/list
     for col in df.columns:
         df[col] = df[col].apply(try_parse_json)
 
-    # Step 2: Recursively flatten columns with dict or list values
+    # recursively flatten nested dict/list columns
     while True:
         nested_cols = [col for col in df.columns if df[col].apply(lambda x: isinstance(x, (dict, list))).any()]
         if not nested_cols:
@@ -129,5 +141,8 @@ def flatten_nested_columns(df):
             new_cols = df[col].apply(lambda x: flatten_element(x, col) if isinstance(x, (dict, list)) else {col: x})
             new_df = pd.DataFrame(new_cols.tolist())
             df = df.drop(columns=[col]).join(new_df)
+
+    # Optionally, convert empty lists/dicts to NaN for cleaner display:
+    df = df.replace({(): np.nan, []: np.nan, {}: np.nan})
 
     return df
