@@ -3,28 +3,22 @@ import json
 
 def flatten_nested_columns(df):
     """
-    Flattens only the nested (dict/list/JSON) columns of a DataFrame.
-    Column names of flattened parts are renamed with dot notation.
-    Non-nested columns are left unchanged.
+    Flattens only the nested (dict/list) columns of a DataFrame,
+    first processing native Python structures, then attempting to parse JSON strings.
+    Only nested fields are flattened, and new column names are prefixed with the original column name.
 
     Args:
         df (pd.DataFrame): Input DataFrame
 
     Returns:
-        pd.DataFrame: DataFrame with only nested fields flattened
+        pd.DataFrame: Flattened DataFrame
     """
 
-    def parse_json(val):
-        # Try to parse JSON strings into Python objects (dict or list)
-        if isinstance(val, str):
-            try:
-                return json.loads(val)
-            except json.JSONDecodeError:
-                return val
-        return val
-
     def flatten_element(elem, prefix=''):
-        # Recursively flatten dicts and lists into a flat dict with dot-separated keys
+        """
+        Recursively flattens a nested structure (dict/list) into a flat dictionary.
+        Keys are dot-separated paths.
+        """
         items = {}
         if isinstance(elem, dict):
             for k, v in elem.items():
@@ -39,20 +33,33 @@ def flatten_nested_columns(df):
         return items
 
     df = df.copy()
-    for col in df.columns:
-        if df[col].dtype == 'object':
-            # Try to parse as JSON if it's a string
-            df[col] = df[col].apply(parse_json)
 
-    flat_cols = []
+    # Step 1: handle actual dict/list objects
     for col in df.columns:
         if df[col].apply(lambda x: isinstance(x, (dict, list))).any():
-            # Needs flattening
             flat_dicts = df[col].apply(lambda x: flatten_element(x, col) if isinstance(x, (dict, list)) else {col: x})
             flat_df = pd.DataFrame(flat_dicts.tolist())
-            flat_cols.append(flat_df)
-        else:
-            # No flattening needed
-            flat_cols.append(df[[col]])
+            df = df.drop(columns=[col]).join(flat_df)
 
-    return pd.concat(flat_cols, axis=1)
+    # Step 2: handle JSON strings that can be parsed into dict/list
+    def try_parse(val):
+        if isinstance(val, str):
+            try:
+                parsed = json.loads(val)
+                if isinstance(parsed, (dict, list)):
+                    return parsed
+            except:
+                pass
+        return val
+
+    for col in df.columns:
+        if df[col].dtype == 'object':
+            df[col] = df[col].apply(try_parse)
+
+    for col in df.columns:
+        if df[col].apply(lambda x: isinstance(x, (dict, list))).any():
+            flat_dicts = df[col].apply(lambda x: flatten_element(x, col) if isinstance(x, (dict, list)) else {col: x})
+            flat_df = pd.DataFrame(flat_dicts.tolist())
+            df = df.drop(columns=[col]).join(flat_df)
+
+    return df
