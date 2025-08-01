@@ -1,0 +1,47 @@
+def flatten_recursive_json_column(df, col):
+    """
+    扁平化 DataFrame 的某一列，该列包含嵌套 JSON（dict 或字符串），
+    并递归展开所有嵌套结构，包括 list of dict。
+
+    参数:
+        df: 原始 DataFrame
+        col: 要扁平化的列名（其值为 JSON 字典或 JSON 字符串）
+
+    返回:
+        扁平化后的 DataFrame
+    """
+    def parse_json(val):
+        if isinstance(val, str):
+            try:
+                return json.loads(val)
+            except json.JSONDecodeError:
+                return val
+        return val
+
+    df[col] = df[col].apply(parse_json)
+
+    # 初次扁平化，展开最上层 dict
+    df_expanded = json_normalize(df[col])
+    df_expanded.columns = [f"{col}.{c}" for c in df_expanded.columns]
+
+    # 将非目标列保留并连接回来
+    other_cols = df.drop(columns=[col]).reset_index(drop=True)
+    df = pd.concat([other_cols, df_expanded], axis=1)
+
+    # 递归处理所有 list of dict 列
+    while True:
+        list_dict_cols = []
+        for c in df.columns:
+            if df[c].apply(lambda x: isinstance(x, list) and all(isinstance(i, dict) for i in x) if isinstance(x, list) else False).any():
+                list_dict_cols.append(c)
+
+        if not list_dict_cols:
+            break
+
+        for c in list_dict_cols:
+            df = df.explode(c, ignore_index=True)
+            expanded = json_normalize(df[c])
+            expanded.columns = [f"{c}.{subcol}" for subcol in expanded.columns]
+            df = df.drop(columns=[c]).join(expanded)
+
+    return df
