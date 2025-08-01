@@ -206,6 +206,65 @@ def flatten_nested_columns_with_empty(df):
 
 
 
+import pandas as pd
+
+def summarize_dataframe_columns_top_samples_merged(df, top_n=20):
+    """
+    Summarize each column in the DataFrame with:
+    - non-null count
+    - null count
+    - dtype
+    - min, max
+    - unique count
+    - merged top N frequent sample values as a single column
+
+    Parameters:
+        df (pd.DataFrame): Input DataFrame
+        top_n (int): Number of top values to merge and display per column
+
+    Returns:
+        pd.DataFrame: Summary DataFrame with one row per column
+    """
+    summary = []
+
+    for col in df.columns:
+        col_data = df[col]
+        non_null_count = col_data.notnull().sum()
+        null_count = col_data.isnull().sum()
+        dtype = str(col_data.dtype)
+
+        try:
+            min_val = col_data.min()
+        except Exception:
+            min_val = None
+        try:
+            max_val = col_data.max()
+        except Exception:
+            max_val = None
+
+        n_unique = col_data.nunique(dropna=True)
+
+        # Get top N sample values, dropna=False to include NaN if frequent
+        top_values = col_data.value_counts(dropna=False).head(top_n).index.tolist()
+
+        # Convert values to string, handle NaN explicitly
+        top_values_str = [str(v) if pd.notna(v) else 'NaN' for v in top_values]
+        top_values_merged = ", ".join(top_values_str)
+
+        row = {
+            "column": col,
+            "non_null_count": non_null_count,
+            "null_count": null_count,
+            "dtype": dtype,
+            "min": min_val,
+            "max": max_val,
+            "n_unique": n_unique,
+            "top_samples": top_values_merged
+        }
+
+        summary.append(row)
+
+    return pd.DataFrame(summary)
 
 
 
