@@ -1,15 +1,19 @@
-def flatten_recursive_json_column(df, col):
-    """
-    扁平化 DataFrame 的某一列，该列包含嵌套 JSON（dict 或字符串），
-    并递归展开所有嵌套结构，包括 list of dict。
+import pandas as pd
+import json
+from pandas import json_normalize
 
-    参数:
-        df: 原始 DataFrame
-        col: 要扁平化的列名（其值为 JSON 字典或 JSON 字符串）
-
-    返回:
-        扁平化后的 DataFrame
+def flatten_all_json_columns_no_explode(df):
     """
+    扁平化 DataFrame 所有 JSON 列，递归展开嵌套 dict 和 list，
+    但不拆分成多行。list 类型会被索引拆分成多列。
+    
+    参数：
+        df: 输入的 DataFrame
+    
+    返回：
+        扁平化且保持行数不变的 DataFrame
+    """
+
     def parse_json(val):
         if isinstance(val, str):
             try:
@@ -18,30 +22,42 @@ def flatten_recursive_json_column(df, col):
                 return val
         return val
 
-    df[col] = df[col].apply(parse_json)
+    def flatten_element(elem, prefix=''):
+        """
+        递归展开 dict 或 list，返回一个扁平的 dict，键为带路径的字符串。
+        list 会用索引标记键名，不会拆成多行。
+        """
+        items = {}
+        if isinstance(elem, dict):
+            for k, v in elem.items():
+                new_key = f"{prefix}.{k}" if prefix else k
+                items.update(flatten_element(v, new_key))
+        elif isinstance(elem, list):
+            for i, v in enumerate(elem):
+                new_key = f"{prefix}.{i}" if prefix else str(i)
+                items.update(flatten_element(v, new_key))
+        else:
+            items[prefix] = elem
+        return items
 
-    # 初次扁平化，展开最上层 dict
-    df_expanded = json_normalize(df[col])
-    df_expanded.columns = [f"{col}.{c}" for c in df_expanded.columns]
+    df = df.copy()
 
-    # 将非目标列保留并连接回来
-    other_cols = df.drop(columns=[col]).reset_index(drop=True)
-    df = pd.concat([other_cols, df_expanded], axis=1)
+    # 先把所有 object 列中可能是 JSON 字符串的解析成 dict/list
+    for col in df.columns:
+        if df[col].dtype == 'object':
+            df[col] = df[col].apply(parse_json)
 
-    # 递归处理所有 list of dict 列
-    while True:
-        list_dict_cols = []
-        for c in df.columns:
-            if df[c].apply(lambda x: isinstance(x, list) and all(isinstance(i, dict) for i in x) if isinstance(x, list) else False).any():
-                list_dict_cols.append(c)
+    # 存放所有列的扁平化结果
+    flat_cols = []
 
-        if not list_dict_cols:
-            break
+    # 对每行，每列做扁平化，结果是 dict，转成 DataFrame 后横向拼接
+    for col in df.columns:
+        flat_dicts = df[col].apply(lambda x: flatten_element(x) if isinstance(x, (dict, list)) else {col: x})
+        flat_df = pd.DataFrame(flat_dicts.tolist())
+        # 给列名加上原列名前缀（避免重复）
+        flat_df.columns = [f"{col}.{c}" for c in flat_df.columns]
+        flat_cols.append(flat_df)
 
-        for c in list_dict_cols:
-            df = df.explode(c, ignore_index=True)
-            expanded = json_normalize(df[c])
-            expanded.columns = [f"{c}.{subcol}" for subcol in expanded.columns]
-            df = df.drop(columns=[c]).join(expanded)
-
-    return df
+    # 拼接所有扁平化列
+    result_df = pd.concat(flat_cols, axis=1)
+    return result_df
