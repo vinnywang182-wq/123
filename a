@@ -85,6 +85,8 @@ def flatten_nested_columns(df):
 import pandas as pd
 import json
 
+
+
 def flatten_nested_columns(df):
     def flatten_element(elem, prefix=''):
         """Recursively flattens dicts/lists into flat keys"""
@@ -101,26 +103,25 @@ def flatten_nested_columns(df):
             items[prefix] = elem
         return items
 
-    def parse_json_like(val):
-        """Try to convert stringified JSON into Python dict/list"""
+    def try_parse_json(val):
+        """Try to convert a string to dict/list if it's JSON-like"""
         if isinstance(val, str):
             try:
                 parsed = json.loads(val)
                 if isinstance(parsed, (dict, list)):
                     return parsed
-            except:
+            except json.JSONDecodeError:
                 return val
         return val
 
     df = df.copy()
 
-    # Step 1: Try parsing all columns for JSON strings
+    # Step 1: Parse JSON-like columns
     for col in df.columns:
-        df[col] = df[col].apply(parse_json_like)
+        df[col] = df[col].apply(try_parse_json)
 
-    # Step 2: For each column, if it contains dict/list, flatten into new columns
+    # Step 2: Recursively flatten columns with dict or list values
     while True:
-        # find nested structure columns
         nested_cols = [col for col in df.columns if df[col].apply(lambda x: isinstance(x, (dict, list))).any()]
         if not nested_cols:
             break
