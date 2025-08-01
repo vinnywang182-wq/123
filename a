@@ -86,17 +86,6 @@ import pandas as pd
 import json
 
 def flatten_nested_columns(df):
-    """
-    Flattens nested structures in a DataFrame, including both Python native structures and JSON strings.
-    Only nested fields are flattened. New column names are prefixed with the original column name.
-
-    Args:
-        df (pd.DataFrame): Input DataFrame
-
-    Returns:
-        pd.DataFrame: Flattened DataFrame
-    """
-
     def flatten_element(elem, prefix=''):
         items = {}
         if isinstance(elem, dict):
@@ -118,22 +107,25 @@ def flatten_nested_columns(df):
                 if isinstance(parsed, (dict, list)):
                     return parsed
             except:
-                pass
+                return val
         return val
 
     df = df.copy()
 
-    # Step 1: Try to convert all stringified JSON into dict/list
+    # Step 1: Apply json parsing even if it seems unnecessary (forcefully)
     for col in df.columns:
-        if df[col].dtype == 'object':
-            df[col] = df[col].apply(try_parse)
+        df[col] = df[col].apply(try_parse)
 
-    # Step 2: Flatten all columns with nested dict or list
-    for col in df.columns:
-        if df[col].apply(lambda x: isinstance(x, (dict, list))).any():
-            flat_dicts = df[col].apply(lambda x: flatten_element(x, col) if isinstance(x, (dict, list)) else {col: x})
-            flat_df = pd.DataFrame(flat_dicts.tolist())
-            df = df.drop(columns=[col]).join(flat_df)
+    # Step 2: Repeat flattening until no nested dict/list remains
+    while True:
+        # Find columns that still contain dict/list
+        nested_cols = [col for col in df.columns if df[col].apply(lambda x: isinstance(x, (dict, list))).any()]
+        if not nested_cols:
+            break
+
+        for col in nested_cols:
+            flattened = df[col].apply(lambda x: flatten_element(x, col) if isinstance(x, (dict, list)) else {col: x})
+            flattened_df = pd.DataFrame(flattened.tolist())
+            df = df.drop(columns=[col]).join(flattened_df)
 
     return df
-
